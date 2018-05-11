@@ -39,6 +39,9 @@ import com.amazonaws.services.elasticbeanstalk.AWSElasticBeanstalkClient;
 import com.amazonaws.services.elasticbeanstalk.model.ApplicationDescription;
 import com.amazonaws.services.elasticbeanstalk.model.DescribeEnvironmentsRequest;
 import com.amazonaws.services.elasticbeanstalk.model.DescribeEnvironmentsResult;
+import com.amazonaws.services.route53.AmazonRoute53;
+import com.amazonaws.services.route53.AmazonRoute53Client;
+import com.amazonaws.services.route53.model.HostedZone;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3Client;
 import com.cloudbees.jenkins.plugins.awscredentials.AmazonWebServicesCredentials;
@@ -48,6 +51,19 @@ import com.cloudbees.plugins.credentials.common.AbstractIdCredentialsListBoxMode
 import com.cloudbees.plugins.credentials.domains.DomainRequirement;
 import com.google.common.base.Function;
 import com.google.common.collect.Lists;
+
+import org.apache.commons.lang.StringUtils;
+import org.kohsuke.stapler.AncestorInPath;
+import org.kohsuke.stapler.DataBoundConstructor;
+import org.kohsuke.stapler.QueryParameter;
+
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.Extension;
@@ -141,11 +157,55 @@ public class AWSEBDeploymentBuilder extends Builder implements BuildStep {
     @Getter
     private boolean checkHealth;
 
+    /**
+     * Create Environment If Not Exist
+     */
+    @Getter
+    private boolean createEnvironmentIfNotExist;
+
+    /**
+     * Environment CNAME Prefix
+     */
+    @Getter
+    private String environmentCNAMEPrefix;
+
+    /**
+     * Environment Template Name
+     */
+    @Getter
+    private String environmentTemplateName;
+
+    /**
+     * Environment Settings
+     */
+    private List<AWSEBRawConfigurationOptionSetting> environmentSettings;
+
+    @Getter
+    private boolean route53UpdateRecordSet;
+
+    @Getter
+    private String route53HostedZoneId;
+
+    private List<AWSEBRoute53DomainName> route53DomainNames;
+
+    @Getter
+    private Long route53RecordTTL;
+
+    @Getter
+    private String route53RecordType;
+
     @DataBoundConstructor
     public AWSEBDeploymentBuilder(String credentialId, String awsRegion, String applicationName,
                                   String environmentName, String bucketName, String keyPrefix,
                                   String versionLabelFormat, String rootObject, String includes,
-                                  String excludes, boolean zeroDowntime, boolean checkHealth) {
+                                  String excludes, boolean zeroDowntime, boolean checkHealth,
+                                  boolean createEnvironmentIfNotExist,
+                                  String environmentCNAMEPrefix,
+                                  String environmentTemplateName,
+                                  List<AWSEBRawConfigurationOptionSetting> environmentSettings,
+                                  boolean route53UpdateRecordSet, String route53HostedZoneId,
+                                  List<AWSEBRoute53DomainName> route53DomainNames, Long route53RecordTTL,
+                                  String route53RecordType) {
         this.credentialId = credentialId;
         this.awsRegion = awsRegion;
         this.applicationName = applicationName;
@@ -158,6 +218,15 @@ public class AWSEBDeploymentBuilder extends Builder implements BuildStep {
         this.excludes = excludes;
         this.zeroDowntime = zeroDowntime;
         this.checkHealth = checkHealth;
+        this.createEnvironmentIfNotExist = createEnvironmentIfNotExist;
+        this.environmentCNAMEPrefix = environmentCNAMEPrefix;
+        this.environmentTemplateName = environmentTemplateName;
+        this.environmentSettings = environmentSettings;
+        this.route53UpdateRecordSet = route53UpdateRecordSet;
+        this.route53HostedZoneId = route53HostedZoneId;
+        this.route53DomainNames = route53DomainNames;
+        this.route53RecordTTL = route53RecordTTL;
+        this.route53RecordType = route53RecordType;
     }
 
     @Override
@@ -199,7 +268,30 @@ public class AWSEBDeploymentBuilder extends Builder implements BuildStep {
                 excludes,
                 zeroDowntime,
                 checkHealth,
-                null);
+                null,
+                createEnvironmentIfNotExist,
+                environmentCNAMEPrefix,
+                environmentTemplateName,
+                environmentSettings,
+                route53UpdateRecordSet,
+                route53HostedZoneId,
+                route53DomainNames,
+                route53RecordTTL,
+                route53RecordType);
+    }
+
+    public List<AWSEBRawConfigurationOptionSetting> getEnvironmentSettings() {
+        if (environmentSettings == null) {
+            return new ArrayList<AWSEBRawConfigurationOptionSetting>();
+        }
+        return environmentSettings;
+    }
+
+    public List<AWSEBRoute53DomainName> getRoute53DomainNames() {
+        if (route53DomainNames == null) {
+            return new ArrayList<AWSEBRoute53DomainName>();
+        }
+        return route53DomainNames;
     }
 
     @Extension
@@ -321,9 +413,29 @@ public class AWSEBDeploymentBuilder extends Builder implements BuildStep {
                 w.printf("<li>Applications Found: %d (%s)</li>%n", applicationList.size(),
                         StringUtils.join(applicationList, ", "));
 
+                AmazonRoute53 amazonRoute53 = factory.getService(AmazonRoute53Client.class);
+                String route53Endpoint = factory.getEndpointFor((AmazonRoute53Client) amazonRoute53);
+
+                w.printf("<li>Testing Amazon Route 53 Service (endpoint: %s)</li>%n", route53Endpoint);
+
+                List<String>
+                        hostedZoneList =
+                        Lists.transform(amazonRoute53.listHostedZones().getHostedZones(),
+                                new Function<HostedZone, String>() {
+                                    @Override
+                                    public String apply(HostedZone input) {
+                                        return input.getName();
+                                    }
+                                });
+
+                w.printf("<li>Hosted Zones Found: %d (%s)</li>%n", hostedZoneList.size(),
+                        StringUtils.join(hostedZoneList, ", "));
+
                 w.printf("</ul>%n");
 
                 return FormValidation.okWithMarkup(stringWriter.toString());
+            }  catch (RuntimeException e) {
+                throw e;
             } catch (Exception exc) {
                 return FormValidation.error(exc, "Failure");
             }

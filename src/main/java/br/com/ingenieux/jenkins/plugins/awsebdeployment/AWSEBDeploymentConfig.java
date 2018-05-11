@@ -21,6 +21,8 @@ import lombok.*;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.jenkinsci.plugins.tokenmacro.MacroEvaluationException;
 
@@ -96,6 +98,24 @@ public class AWSEBDeploymentConfig implements Serializable {
    */
   private AmazonWebServicesCredentials credentials;
 
+  private boolean createEnvironmentIfNotExist;
+
+  private String environmentCNAMEPrefix;
+
+  private String environmentTemplateName;
+
+  private List<AWSEBRawConfigurationOptionSetting> environmentSettings;
+
+  private boolean route53UpdateRecordSet;
+
+  private String route53HostedZoneId;
+
+  private List<AWSEBRoute53DomainName> route53DomainNames;
+
+  private Long route53RecordTTL;
+
+  private String route53RecordType;
+
   /**
    * Copy Factory
    *
@@ -103,6 +123,24 @@ public class AWSEBDeploymentConfig implements Serializable {
    * @return replaced copy
    */
   public AWSEBDeploymentConfig replacedCopy(Utils.Replacer r) throws MacroEvaluationException, IOException, InterruptedException {
+    List<AWSEBRawConfigurationOptionSetting> evalSettings = new ArrayList<AWSEBRawConfigurationOptionSetting>();
+
+    if (this.getEnvironmentSettings() != null) {
+      for(AWSEBRawConfigurationOptionSetting setting :this.getEnvironmentSettings()){
+        AWSEBRawConfigurationOptionSetting evalSetting = new AWSEBRawConfigurationOptionSetting(r.r(setting.getNamespace()), r.r(setting.getOptionName()), r.r(setting.getValue()));
+        evalSettings.add(evalSetting);
+      }
+    }
+
+    List<AWSEBRoute53DomainName> evalDomainNames = new ArrayList<AWSEBRoute53DomainName>();
+
+    if (this.getRoute53DomainNames() != null) {
+      for (AWSEBRoute53DomainName domainName : this.getRoute53DomainNames()) {
+        AWSEBRoute53DomainName evalDomainName = new AWSEBRoute53DomainName(r.r(domainName.getName()));
+        evalDomainNames.add(evalDomainName);
+      }
+    }
+
     return new AWSEBDeploymentConfig(
         r.r(this.getCredentialId()),
         r.r(this.getAwsRegion()),
@@ -116,7 +154,16 @@ public class AWSEBDeploymentConfig implements Serializable {
         r.r(this.getExcludes()),
         this.isZeroDowntime(),
         this.isCheckHealth(),
-        this.credentials
+        this.credentials,
+        this.isCreateEnvironmentIfNotExist(),
+        r.r(this.getEnvironmentCNAMEPrefix()),
+        r.r(this.getEnvironmentTemplateName()),
+        evalSettings,
+        this.isRoute53UpdateRecordSet(),
+        r.r(this.getRoute53HostedZoneId()),
+        evalDomainNames,
+        this.route53RecordTTL,
+        r.r(this.getRoute53RecordType())
     );
   }
 }
