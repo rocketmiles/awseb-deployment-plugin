@@ -4,6 +4,8 @@
 
 Jenkins Plugin for AWS Elastic Beanstalk Deployments
 
+NOTE: Jenkins1 uses a plugin built from the SYS-482 branch that is the result of the upstream tag 0.3.8 merged with an unermged PR to create an environment when none exists
+
 ## TODO LIST
 
   * Update Docs
