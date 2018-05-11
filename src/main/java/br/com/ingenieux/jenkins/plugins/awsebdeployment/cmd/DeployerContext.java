@@ -37,6 +37,8 @@ import java.util.List;
 @RequiredArgsConstructor
 @Data
 public class DeployerContext implements Constants, Serializable {
+    private static final long serialVersionUID = -1L;
+
     /**
      * Deployer Config
      */

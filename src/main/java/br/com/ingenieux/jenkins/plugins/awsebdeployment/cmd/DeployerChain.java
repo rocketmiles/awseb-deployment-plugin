@@ -98,12 +98,16 @@ public class DeployerChain {
 
             commandList.add(new DeployerCommand.AbortPendingUpdates());
 
-            commandList.add(new DeployerCommand.WaitForEnvironment(WaitFor.Status));
+            commandList.add(new DeployerCommand.WaitForEnvironment(WaitFor.Status).withoutVersionCheck());
 
             commandList.add(new DeployerCommand.UpdateApplicationVersion());
         }
 
-        commandList.add(new DeployerCommand.WaitForEnvironment(WaitFor.Both));
+        if (c.deployerConfig.isCheckHealth()) {
+            commandList.add(new DeployerCommand.WaitForEnvironment(WaitFor.Both));
+        } else {
+            commandList.add(new DeployerCommand.WaitForEnvironment(WaitFor.Status));
+        }
 
         if (c.deployerConfig.isRoute53UpdateRecordSet()) {
             commandList.add(new UpdateCNAME());

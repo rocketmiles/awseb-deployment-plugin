@@ -19,8 +19,20 @@
 
 package br.com.ingenieux.jenkins.plugins.awsebdeployment;
 
-import com.google.common.base.Function;
-import com.google.common.collect.Lists;
+import static java.lang.String.format;
+import static org.apache.commons.lang.StringUtils.defaultIfBlank;
+
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+
+import org.apache.commons.lang.StringUtils;
+import org.kohsuke.stapler.AncestorInPath;
+import org.kohsuke.stapler.DataBoundConstructor;
+import org.kohsuke.stapler.QueryParameter;
 
 import com.amazonaws.services.elasticbeanstalk.AWSElasticBeanstalk;
 import com.amazonaws.services.elasticbeanstalk.AWSElasticBeanstalkClient;
@@ -37,6 +49,8 @@ import com.cloudbees.plugins.credentials.CredentialsNameProvider;
 import com.cloudbees.plugins.credentials.CredentialsProvider;
 import com.cloudbees.plugins.credentials.common.AbstractIdCredentialsListBoxModel;
 import com.cloudbees.plugins.credentials.domains.DomainRequirement;
+import com.google.common.base.Function;
+import com.google.common.collect.Lists;
 
 import org.apache.commons.lang.StringUtils;
 import org.kohsuke.stapler.AncestorInPath;
@@ -66,15 +80,11 @@ import hudson.tasks.Builder;
 import hudson.util.FormValidation;
 import lombok.Getter;
 
-import static java.lang.String.format;
-import static org.apache.commons.lang.StringUtils.defaultIfBlank;
-
 /**
  * AWS Elastic Beanstalk Deployment
  */
 @SuppressWarnings({"unchecked", "deprecation"})
 public class AWSEBDeploymentBuilder extends Builder implements BuildStep {
-
     /**
      * Credentials name
      */
@@ -142,6 +152,12 @@ public class AWSEBDeploymentBuilder extends Builder implements BuildStep {
     private boolean zeroDowntime;
 
     /**
+     * Check Health
+     */
+    @Getter
+    private boolean checkHealth;
+
+    /**
      * Create Environment If Not Exist
      */
     @Getter
@@ -182,7 +198,8 @@ public class AWSEBDeploymentBuilder extends Builder implements BuildStep {
     public AWSEBDeploymentBuilder(String credentialId, String awsRegion, String applicationName,
                                   String environmentName, String bucketName, String keyPrefix,
                                   String versionLabelFormat, String rootObject, String includes,
-                                  String excludes, boolean zeroDowntime, boolean createEnvironmentIfNotExist,
+                                  String excludes, boolean zeroDowntime, boolean checkHealth,
+                                  boolean createEnvironmentIfNotExist,
                                   String environmentCNAMEPrefix,
                                   String environmentTemplateName,
                                   List<AWSEBRawConfigurationOptionSetting> environmentSettings,
@@ -200,6 +217,7 @@ public class AWSEBDeploymentBuilder extends Builder implements BuildStep {
         this.includes = includes;
         this.excludes = excludes;
         this.zeroDowntime = zeroDowntime;
+        this.checkHealth = checkHealth;
         this.createEnvironmentIfNotExist = createEnvironmentIfNotExist;
         this.environmentCNAMEPrefix = environmentCNAMEPrefix;
         this.environmentTemplateName = environmentTemplateName;
@@ -249,6 +267,7 @@ public class AWSEBDeploymentBuilder extends Builder implements BuildStep {
                 includes,
                 excludes,
                 zeroDowntime,
+                checkHealth,
                 null,
                 createEnvironmentIfNotExist,
                 environmentCNAMEPrefix,
@@ -336,9 +355,9 @@ public class AWSEBDeploymentBuilder extends Builder implements BuildStep {
                 return FormValidation.warning("Validation skipped due to parameter usage ('$')");
             }
 
-            if (!value.matches("^\\p{Alpha}[\\p{Alnum}\\-]{0,22}$") || value.endsWith("-")) {
+            if (!value.matches("^\\p{Alpha}[\\p{Alnum}\\-]{0,39}$") || value.endsWith("-")) {
                 return FormValidation.error(
-                        "Doesn't look like an environment name. Must be from 4 to 23 characters in length. The name can contain only letters, numbers, and hyphens. It cannot start or end with a hyphen");
+                        "Doesn't look like an environment name. Must be from 4 to 40 characters in length. The name can contain only letters, numbers, and hyphens. It cannot start or end with a hyphen");
             }
             return FormValidation.ok();
         }
@@ -356,9 +375,9 @@ public class AWSEBDeploymentBuilder extends Builder implements BuildStep {
             PrintWriter w = new PrintWriter(stringWriter, true);
 
             try {
-                w.printf("<ul>\n");
+                w.printf("<ul>%n");
 
-                w.printf("<li>Building Client (credentialId: '%s', region: '%s')</li>\n", credentialId,
+                w.printf("<li>Building Client (credentialId: '%s', region: '%s')</li>%n", credentialId,
                         awsRegion);
 
                 AWSClientFactory factory = AWSClientFactory.getClientFactory(credentialId, awsRegion);
@@ -366,9 +385,9 @@ public class AWSEBDeploymentBuilder extends Builder implements BuildStep {
                 AmazonS3 amazonS3 = factory.getService(AmazonS3Client.class);
                 String s3Endpoint = factory.getEndpointFor((AmazonS3Client) amazonS3);
 
-                w.printf("<li>Testing Amazon S3 Service (endpoint: %s)</li>\n", s3Endpoint);
+                w.printf("<li>Testing Amazon S3 Service (endpoint: %s)</li>%n", s3Endpoint);
 
-                w.printf("<li>Buckets Found: %d</li>\n", amazonS3.listBuckets().size());
+                w.printf("<li>Buckets Found: %d</li>%n", amazonS3.listBuckets().size());
 
                 AWSElasticBeanstalk
                         awsElasticBeanstalk =
@@ -378,7 +397,7 @@ public class AWSEBDeploymentBuilder extends Builder implements BuildStep {
                         awsEBEndpoint =
                         factory.getEndpointFor((AWSElasticBeanstalkClient) awsElasticBeanstalk);
 
-                w.printf("<li>Testing AWS Elastic Beanstalk Service (endpoint: %s)</li>\n",
+                w.printf("<li>Testing AWS Elastic Beanstalk Service (endpoint: %s)</li>%n",
                         awsEBEndpoint);
 
                 List<String>
@@ -391,10 +410,9 @@ public class AWSEBDeploymentBuilder extends Builder implements BuildStep {
                                     }
                                 });
 
-                w.printf("<li>Applications Found: %d (%s)</li>\n", applicationList.size(),
+                w.printf("<li>Applications Found: %d (%s)</li>%n", applicationList.size(),
                         StringUtils.join(applicationList, ", "));
 
-                w.printf("</ul>\n");
                 AmazonRoute53 amazonRoute53 = factory.getService(AmazonRoute53Client.class);
                 String route53Endpoint = factory.getEndpointFor((AmazonRoute53Client) amazonRoute53);
 
@@ -413,7 +431,7 @@ public class AWSEBDeploymentBuilder extends Builder implements BuildStep {
                 w.printf("<li>Hosted Zones Found: %d (%s)</li>%n", hostedZoneList.size(),
                         StringUtils.join(hostedZoneList, ", "));
 
-                w.printf("</ul>\n");
+                w.printf("</ul>%n");
 
                 return FormValidation.okWithMarkup(stringWriter.toString());
             }  catch (RuntimeException e) {

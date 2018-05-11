@@ -1,3 +1,4 @@
+<?jelly escape-by-default='true'?>
 <!--
   ~ Copyright 2011 ingenieux Labs
   ~
@@ -13,7 +14,6 @@
   ~    See the License for the specific language governing permissions and
   ~    limitations under the License.
   -->
-
 <j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form" xmlns:c="/lib/credentials">
     <!--
       This jelly script is used for per-project configuration.
@@ -113,6 +113,10 @@
 
         <f:entry title="Zero downtime?" field="zeroDowntime">
             <f:checkbox/>
+        </f:entry>
+
+        <f:entry title="Ensure Health is Green after deploy?" field="checkHealth">
+            <f:checkbox default="true"/>
         </f:entry>
 
         <f:validateButton method="validateUpload" title="Explain Upload"

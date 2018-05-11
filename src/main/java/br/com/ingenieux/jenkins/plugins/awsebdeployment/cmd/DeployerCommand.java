@@ -22,7 +22,10 @@ import com.amazonaws.services.elasticbeanstalk.model.CreateApplicationVersionReq
 import com.amazonaws.services.elasticbeanstalk.model.CreateApplicationVersionResult;
 import com.amazonaws.services.elasticbeanstalk.model.DescribeEnvironmentsRequest;
 import com.amazonaws.services.elasticbeanstalk.model.DescribeEnvironmentsResult;
+import com.amazonaws.services.elasticbeanstalk.model.DescribeEventsRequest;
+import com.amazonaws.services.elasticbeanstalk.model.DescribeEventsResult;
 import com.amazonaws.services.elasticbeanstalk.model.EnvironmentDescription;
+import com.amazonaws.services.elasticbeanstalk.model.EventDescription;
 import com.amazonaws.services.elasticbeanstalk.model.S3Location;
 import com.amazonaws.services.elasticbeanstalk.model.UpdateEnvironmentRequest;
 import com.amazonaws.services.route53.AmazonRoute53Client;
@@ -30,14 +33,15 @@ import com.amazonaws.services.s3.AmazonS3Client;
 
 import org.apache.commons.lang.Validate;
 
-import java.io.PrintStream;
 import java.util.Collections;
+import java.util.Date;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import br.com.ingenieux.jenkins.plugins.awsebdeployment.AWSClientFactory;
 import br.com.ingenieux.jenkins.plugins.awsebdeployment.Constants;
 import br.com.ingenieux.jenkins.plugins.awsebdeployment.Utils;
+import edu.umd.cs.findbugs.annotations.SuppressWarnings;
 import lombok.Data;
 import lombok.experimental.Delegate;
 
@@ -196,7 +200,16 @@ public class DeployerCommand implements Constants {
                 return true;
             }
 
-            final String environmentId = result.getEnvironments().get(0).getEnvironmentId();
+            final EnvironmentDescription environmentDescription = result.getEnvironments().get(0);
+
+            if (environmentDescription.getVersionLabel().equals(getVersionLabel())) {
+                log("The version to deploy and currently used are the same. Even if you overwrite, AWSEB won't allow you to update." +
+                        "Skipping.");
+
+                return true;
+            }
+
+            final String environmentId = environmentDescription.getEnvironmentId();
 
             log("Using environmentId '%s'", environmentId);
 
@@ -227,16 +240,44 @@ public class DeployerCommand implements Constants {
     /**
      * Waits for the Environment to be Green and Available
      */
+    @SuppressWarnings({"EQ_DOESNT_OVERRIDE_EQUALS"})
     public static class WaitForEnvironment extends DeployerCommand {
         final WaitFor waitFor;
 
+        boolean versionCheck;
+
         public WaitForEnvironment(WaitFor waitFor) {
             this.waitFor = waitFor;
+            this.versionCheck = true;
+        }
+
+        public WaitForEnvironment withoutVersionCheck() {
+            this.versionCheck = false;
+
+            return this;
         }
 
         @Override
         public boolean perform() throws Exception {
+            Long lastMessageTimestamp = System.currentTimeMillis();
+
             for (int nAttempt = 1; nAttempt <= MAX_ATTEMPTS; nAttempt++) {
+                {
+                    final DescribeEventsResult describeEventsResult = getAwseb().describeEvents(
+                            new DescribeEventsRequest()
+                                    .withEnvironmentId(getEnvironmentId())
+                                    .withStartTime(new Date(lastMessageTimestamp))
+                    );
+
+                    for (EventDescription eventDescription : describeEventsResult.getEvents()) {
+                        log("%s [%s] %s", eventDescription.getEventDate(), eventDescription.getSeverity(), eventDescription.getMessage());
+
+                        lastMessageTimestamp = Math.max(eventDescription.getEventDate().getTime(), lastMessageTimestamp);
+                    }
+                }
+
+                Thread.sleep(TimeUnit.SECONDS.toMillis(SLEEP_TIME));
+
                 log("Checking health/status of environmentId %s attempt %d/%s", getEnvironmentId(), nAttempt,
                         MAX_ATTEMPTS);
 
@@ -254,6 +295,21 @@ public class DeployerCommand implements Constants {
                 }
 
                 EnvironmentDescription environmentDescription = environments.get(0);
+
+                // Before checking status and readiness, we must check version unless told otherwise
+                {
+                    final boolean bHasDifferentVersion = !getVersionLabel().equals(getVersionLabel());
+
+                    if (versionCheck) {
+                        log("Versions reported: (current=%s, underDeployment: %s). Should I move on? %s",
+                                environmentDescription.getVersionLabel(),
+                                getVersionLabel(),
+                                String.valueOf(bHasDifferentVersion));
+                        if (bHasDifferentVersion) {
+                            continue;
+                        }
+                    }
+                }
 
                 final boolean bHealthyP = GREEN_HEALTH.equals(environmentDescription.getHealth());
                 final boolean bReadyP = STATUS_READY.equals(environmentDescription.getStatus());
@@ -277,13 +333,15 @@ public class DeployerCommand implements Constants {
                         return false;
                     }
                 }
-
-                Thread.sleep(TimeUnit.SECONDS.toMillis(SLEEP_TIME));
             }
 
             log("Environment Update timed-out. Aborting.");
 
             return true;
+        }
+
+        protected boolean checkVersionLabel(String deployedVersionLabel) throws Exception {
+            return getVersionLabel().equals(deployedVersionLabel);
         }
     }
 
@@ -332,7 +390,7 @@ public class DeployerCommand implements Constants {
                     log("Environment Update Aborted. Proceeding.");
                 }
 
-                WaitForEnvironment waitForStatus = new WaitForEnvironment(WaitFor.Status);
+                WaitForEnvironment waitForStatus = new WaitForEnvironment(WaitFor.Status).withoutVersionCheck();
 
                 waitForStatus.setDeployerContext(c);
 
