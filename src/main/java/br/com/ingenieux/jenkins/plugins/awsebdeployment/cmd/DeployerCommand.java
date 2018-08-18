@@ -185,6 +185,7 @@ public class DeployerCommand implements Constants {
 
             DescribeEnvironmentsResult result = getAwseb().describeEnvironments(req);
 
+
             if (result.getEnvironments().size() < 1) {
                 log("Unable to lookup environmentId. Skipping Update.");
 
@@ -368,6 +369,20 @@ public class DeployerCommand implements Constants {
 
         protected boolean checkVersionLabel(String deployedVersionLabel) {
             return getVersionLabel().equals(deployedVersionLabel);
+        }
+    }
+
+    /**
+     * Marks the deployment as successful
+     */
+    public static class MarkAsSuccessful extends DeployerCommand {
+        @Override
+        public boolean perform() {
+            log("Deployment marked as 'successful'. Starting post-deployment cleanup.");
+
+            setSuccessfulP(true);
+
+            return false;
         }
     }
 
